@@ -69,7 +69,7 @@ struct cntrl_header{
 	uint16_t next_name;		
 };
 
-char buf[40], encrypt_message[40], encrypt_message_new[40];
+char control_message[40], buf[40], encrypt_message[40], encrypt_message_new[40];
 int numbytes;
 struct sockaddr_in my_addr, router_addr;
 struct sockaddr_in incoming_addr;
@@ -152,12 +152,6 @@ uint8_t* circuit_creation(int n_routers, int m_hops){
         AES_KEY enc_key;
         unsigned char next_node[6];
         sprintf((char*)next_node,"%d",port_number_router_int_global[i-1]);
-
-        if(i==m_hops){
-            //cnt_h->next_name = 0xffff;
-            sprintf((char*)next_node,"%d",0xffff);
-        }
-
         unsigned char clear_text[100];
         memcpy(clear_text,next_node,strlen((char*)next_node)+1);
         int clear_text_len = strlen((char*)clear_text) + 1;
@@ -183,13 +177,12 @@ uint8_t* circuit_creation(int n_routers, int m_hops){
         ip_encrypt_new->protocol = 250;
         encrypt_h_new->type = 0x62;
         encrypt_h_new->circuit_id = 0x01;
-        memcpy(encrypt_h_new->key,crypt_text,strlen((char*)crypt_text)+1);
-        router_addr.sin_family = AF_INET;
-        router_addr.sin_port = htons(port_number_router_int_global[i-1]);
-        router_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-        memset(router_addr.sin_zero,'\0',sizeof router_addr.sin_zero);
-        router_addr_len = sizeof(struct sockaddr_in);
-
+        memcpy(encrypt_h_new->key,crypt_text,16);
+        //fprintf(stderr, "size of encrypt_message_new = %d\n",sizeof(encrypt_message_new));
+        for(int i=0;i<16;i++){
+            fprintf(stderr, "%x",encrypt_h_new->key[i]);
+        } 
+        fprintf(stderr,"\n");
         if ((numbytes = sendto(sockfd_proxy,encrypt_message_new,sizeof(encrypt_message_new), 0,
                 (struct sockaddr *)&router_addr, router_addr_len)) == -1) {
             perror("talker_circuit: sendto");
@@ -197,16 +190,43 @@ uint8_t* circuit_creation(int n_routers, int m_hops){
         }
         fprintf(stderr, "Sent key to router\n");
         free(crypt_text);
+        memset(&control_message, 0, sizeof(control_message));   
+        memset(&buf, 0, sizeof(buf));
+        struct iphdr *ip = (struct iphdr*) control_message;
+        struct cntrl_header * cnt_h =  (struct cntrl_header *) (control_message+ sizeof(struct iphdr));   
+        ip->saddr = inet_addr("127.0.0.1");
+        ip->daddr = inet_addr("127.0.0.1");
+        ip->protocol = 253;
+        my_addr.sin_family = AF_INET;
+        my_addr.sin_port = htons(port_number_router_int_global[0]);
+        my_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        memset(my_addr.sin_zero,'\0',sizeof my_addr.sin_zero);
+        socklen_t my_addr_len = sizeof(struct sockaddr_in);
+        cnt_h->type = 0x68;
+        cnt_h->circuit_id = 0x01;
+        cnt_h->next_name = port_number_router_int_global[i];
+        if(i==m_hops){
+            cnt_h->next_name = 0xffff;
+        }
+        
+        if ((numbytes = sendto(sockfd_proxy,control_message,sizeof(control_message), 0,
+                (struct sockaddr *)&my_addr, my_addr_len)) == -1) {
+            perror("talker_circuit: sendto");
+            exit(1);
+        }
+
         if ((numbytes = recvfrom(sockfd_proxy, buf,sizeof(buf), 0,
                 (struct sockaddr *)&incoming_addr, &(incoming_addr_len))) == -1) {
             perror("recvfrom_proxy_circuit");
             exit(1);
         }
-        fprintf(stderr, "Received ACK from router\n");
-        struct encrypt_header * encrypt_h_recv =  (struct encrypt_header *) (buf+ sizeof(struct iphdr));
+
+        struct cntrl_header * cnt_h_recv =  (struct cntrl_header *) (buf+ sizeof(struct iphdr));
+
         out_proxy = fopen("stage6.proxy.out","a+");
-        fprintf(out_proxy,"pkt from port: %u, length: 3, contents: 0x%x%04x\n",ntohs(incoming_addr.sin_port),encrypt_h_recv->type,encrypt_h_recv->circuit_id);
-        fprintf(out_proxy,"incoming extend-done circuit, incoming: 0x%x from port: %u\n",encrypt_h_recv->circuit_id,ntohs(incoming_addr.sin_port));
+        fprintf(out_proxy,"pkt from port: %u, length: 3, contents: 0x%x%04x\n",ntohs(incoming_addr.sin_port),cnt_h_recv->type,cnt_h_recv->circuit_id);
+
+        fprintf(out_proxy,"incoming extend-done circuit, incoming: 0x%x from port: %u\n",cnt_h_recv->circuit_id,ntohs(incoming_addr.sin_port));
         fclose(out_proxy);   
     }
 
