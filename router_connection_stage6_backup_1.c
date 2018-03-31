@@ -31,7 +31,7 @@ uint16_t out_c_id;
 uint16_t in_port;
 uint16_t out_port;
 unsigned char out_port_text[10];
-uint8_t key[16];
+unsigned char key[16];
 int client_connection_stage6(int x){
 
     int sockfd, sockfd_raw, sockfd_loopback;

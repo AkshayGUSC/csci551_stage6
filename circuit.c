@@ -32,6 +32,8 @@ void class_AES_encrypt_with_padding(unsigned char *in, int len, unsigned char **
     memset(padded_in + len, 0, padded_len - len);
     padded_in[padded_len-1] = padding_required;
 
+    fprintf(stderr, "padded_len = %d\n", padded_len);
+
     *out = malloc(padded_len);
     assert(*out);  /* or out of memory */
     *out_len = padded_len;
@@ -64,57 +66,71 @@ struct __attribute__((packed, scalar_storage_order("big-endian")))encrypt_header
 };
 
 struct cntrl_header{
-	uint8_t type;
-	uint16_t circuit_id;
-	uint16_t next_name;		
+    uint8_t type;
+    uint16_t circuit_id;
+    uint16_t next_name;     
 };
 
-char buf[40], encrypt_message[40], encrypt_message_new[40];
+char buf[40], encrypt_message[60], encrypt_message_new[60];
 int numbytes;
 struct sockaddr_in my_addr, router_addr;
 struct sockaddr_in incoming_addr;
 socklen_t incoming_addr_len = sizeof(struct sockaddr_in);
-static uint8_t key[16*6] = {0};
+static unsigned char key[16*6] = {0};
 int first_message =1;
 socklen_t router_addr_len;
-unsigned char *key_text;
+unsigned char key_text[16], key_text_old[16];
 
-void sending_first_key(int m_hops){
-            int k =1;
-            int temp;
-            fprintf(stderr,"%%%%%%%%%%%%%%%%!!!\n");
-            while(k<=m_hops){
-                temp = 16*(k-1);
-                for(int i=temp;i<temp+16;i++){
-                    key[i]= rand()%255;
-                    fprintf(stderr,"%x",key[i]);
-                }
-                k++;
-            }
+void sending_key(int m_hops, int router_index){
+            int in =0;
+            unsigned char clear_text[100];
+            unsigned char *crypt_text;
+            int crypt_text_len;
+            AES_KEY enc_key;
+            memset(&encrypt_message, 0, sizeof encrypt_message);
             struct iphdr *ip_encrypt = (struct iphdr*) encrypt_message;
             struct encrypt_header *encrypt_h = (struct encrypt_header *) (encrypt_message+ sizeof(struct iphdr));
             ip_encrypt->saddr = inet_addr(ip_address_info_stage6("eth0"));
             ip_encrypt->daddr = address_list_global[1]; // sending next hop address
             ip_encrypt->protocol = 250;
 
-            router_addr.sin_family = AF_INET;
-            router_addr.sin_port = htons(port_number_router_int_global[0]);
-            router_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-            memset(router_addr.sin_zero,'\0',sizeof router_addr.sin_zero);
-            router_addr_len = sizeof(struct sockaddr_in);
             encrypt_h->type = 0x65;
             encrypt_h->circuit_id = 0x01;
-
+            fprintf(stderr, "\n This is the key to be encrypted for router index = %d\n",router_index);
+            for(int i=16*router_index;i<16*(router_index+1);i++){
+                clear_text[in] = key[i];
+                fprintf(stderr, "%x",clear_text[in]);
+                in++;
+            }
+            clear_text[16]='\0';
+            int clear_text_len = strlen((char*)clear_text)+1;
             
-            fprintf(stderr, "printing KEY IN CHAR\n");
-            for(int i=0;i<16;i++){
-                encrypt_h->key[i] = key[i];
+            fprintf(stderr, "\nBelow is the key for router 0\n");
+///////////////////////////
+
+            for(int outer=router_index;outer>=1;outer--){
+                int m=0;
+                for(int inner=16*(outer-1);inner<16*outer;inner++){                    
+                    key_text[m] = key[inner];
+                    fprintf(stderr, "%x",key_text[m]);
+                    m++;
+                }
+                fprintf(stderr, "\n"); 
+                key_text[16] ='\0';           
+                class_AES_set_encrypt_key(key_text, &enc_key);
+                class_AES_encrypt_with_padding(clear_text, clear_text_len, &crypt_text, &crypt_text_len, &enc_key);
+            
+                fprintf(stderr, "*******strlen(crypt_text)=%d, crypt_text_len=%d,  and sizeof crypt text =%d\n", strlen((char*)crypt_text),crypt_text_len, sizeof crypt_text);
+                memset(&clear_text, 0, sizeof(clear_text));
+                memcpy(clear_text,crypt_text,crypt_text_len); // check if +1 needed for null or not
+                clear_text_len = strlen((char*)clear_text);
+                fprintf(stderr, "******* and crypt size=%d and clear text len =%d\n", crypt_text_len, clear_text_len);
             }
-            key_text = (unsigned char*)encrypt_h->key;
-            for(int i=0;i<16;i++){
-                fprintf(stderr, "%x",key_text[i]);
-            }
-            fprintf(stderr, "\n");
+////////////////////////////////////
+            if(router_index == 0)
+                memcpy(encrypt_h->key,clear_text,strlen(clear_text)+1);
+            else
+                memcpy(encrypt_h->key,crypt_text,crypt_text_len);
 
             out_proxy = fopen("stage6.proxy.out","a+");
             fprintf(out_proxy,"new-fake-diffe-hellman, router index: 1 circuit outgoing: 0x01, key: ");
@@ -124,11 +140,21 @@ void sending_first_key(int m_hops){
             fprintf(out_proxy,"\n");
             fclose(out_proxy); 
 
+            fprintf(stderr, "*******crypt_text_len=%d\n",strlen(encrypt_h->key));
+
+            router_addr.sin_family = AF_INET;
+            router_addr.sin_port = htons(port_number_router_int_global[0]);
+            router_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+            memset(router_addr.sin_zero,'\0',sizeof router_addr.sin_zero);
+            router_addr_len = sizeof(struct sockaddr_in);
+
             if ((numbytes = sendto(sockfd_proxy,encrypt_message,sizeof(encrypt_message), 0,
                     (struct sockaddr *)&router_addr, router_addr_len)) == -1) {
                 perror("talker_circuit: sendto");
                 exit(1);
             } 
+            //free(crypt_text);
+
 }
 
 uint8_t* circuit_creation(int n_routers, int m_hops){
@@ -141,41 +167,55 @@ uint8_t* circuit_creation(int n_routers, int m_hops){
         fprintf(out_proxy,"hop: %d, router: %d\n",i,i);
         fclose(out_proxy);
     }
-
-    for(int i=1;i<=m_hops;i++){
-        if(first_message == 1){
-            sending_first_key(m_hops); 
-            first_message =0;
+    int k =1;
+    int temp;
+    fprintf(stderr,"%%%%%%%%%%%%%%%%!!!\n");
+    //time_t t;
+    while(k<=m_hops){
+        //srand ( time(NULL) );
+        temp = 16*(k-1);
+        for(int i=temp;i<(temp+16);i++){
+            key[i]= rand()%256;
+            fprintf(stderr,"%x",key[i]);
         }
+        k++;
+    }
+    fprintf(stderr,"\n Length of key = %d\n",strlen((char*)key));
+    for(int i=1;i<=m_hops;i++){
+        
+        sending_key(m_hops, i-1); 
+
+
         unsigned char *crypt_text;
         int crypt_text_len;
         AES_KEY enc_key;
         unsigned char next_node[6];
-        sprintf((char*)next_node,"%d",port_number_router_int_global[i-1]);
+        sprintf((char*)next_node,"%d",port_number_router_int_global[i]);
 
         if(i==m_hops){
             //cnt_h->next_name = 0xffff;
             sprintf((char*)next_node,"%d",0xffff);
         }
-
+        usleep(1000); /*Should add a recvfrom in the sender key to get response on setting key*/
         unsigned char clear_text[100];
         memcpy(clear_text,next_node,strlen((char*)next_node)+1);
-        int clear_text_len = strlen((char*)clear_text) + 1;
+        int clear_text_len = strlen((char*)clear_text);
         fprintf(stderr, "Port Number = %s\n", clear_text);
         for(int outer=i;outer>0;outer--){
             int m=0;
-            for(int inner=16*(outer-1);inner<16*outer;inner++){
+            for(int inner=16*(outer-1);inner<16*outer;inner++){               
                 key_text[m] = key[inner];
                 m++;
-            }
-            class_AES_set_encrypt_key(key_text, &enc_key);
-            class_AES_encrypt_with_padding(clear_text, clear_text_len, &crypt_text, &crypt_text_len, &enc_key);
-            fprintf(stderr, "%s and crypt size=%d and clear text len =%d\n", crypt_text, crypt_text_len, clear_text_len);
+            }            
+            class_AES_set_encrypt_key(key_text, &enc_key);            
+            class_AES_encrypt_with_padding(clear_text, clear_text_len, &crypt_text, &crypt_text_len, &enc_key);            
+            fprintf(stderr, "strlen(crypt_text)=%d, crypt_text_len=%d,  and clear text len =%d\n", strlen((char*)crypt_text),crypt_text_len, clear_text_len);
             memset(&clear_text, 0, sizeof(clear_text));
-            memcpy(clear_text,crypt_text,strlen((char*)crypt_text)+1);
-            clear_text_len = strlen((char*)clear_text)+1;
-            fprintf(stderr, "!!!!!%s and crypt size=%d and clear text len =%d\n", crypt_text, crypt_text_len, clear_text_len);
+            memcpy(clear_text,crypt_text,crypt_text_len); // check if +1 needed for null or not
+            clear_text_len = strlen((char*)clear_text);
+            fprintf(stderr, "!!!!! and crypt size=%d and clear text len =%d\n", crypt_text_len, clear_text_len);
         }
+
         struct iphdr *ip_encrypt_new = (struct iphdr*) encrypt_message_new;
         struct encrypt_header *encrypt_h_new = (struct encrypt_header *) (encrypt_message_new+ sizeof(struct iphdr));
         ip_encrypt_new->saddr = inet_addr(ip_address_info_stage6("eth0"));
@@ -183,18 +223,23 @@ uint8_t* circuit_creation(int n_routers, int m_hops){
         ip_encrypt_new->protocol = 250;
         encrypt_h_new->type = 0x62;
         encrypt_h_new->circuit_id = 0x01;
-        memcpy(encrypt_h_new->key,crypt_text,strlen((char*)crypt_text)+1);
+        memcpy(encrypt_h_new->key,crypt_text,crypt_text_len);
         router_addr.sin_family = AF_INET;
-        router_addr.sin_port = htons(port_number_router_int_global[i-1]);
+        router_addr.sin_port = htons(port_number_router_int_global[0]);
         router_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
         memset(router_addr.sin_zero,'\0',sizeof router_addr.sin_zero);
         router_addr_len = sizeof(struct sockaddr_in);
 
-        if ((numbytes = sendto(sockfd_proxy,encrypt_message_new,sizeof(encrypt_message_new), 0,
+
+        
+            if ((numbytes = sendto(sockfd_proxy,encrypt_message_new,sizeof(encrypt_message_new), 0,
                 (struct sockaddr *)&router_addr, router_addr_len)) == -1) {
             perror("talker_circuit: sendto");
             exit(1);
-        }
+            }
+        
+
+        
         fprintf(stderr, "Sent key to router\n");
         free(crypt_text);
         if ((numbytes = recvfrom(sockfd_proxy, buf,sizeof(buf), 0,

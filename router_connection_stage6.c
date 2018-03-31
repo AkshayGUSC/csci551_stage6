@@ -30,8 +30,7 @@ uint16_t in_c_id;
 uint16_t out_c_id;
 uint16_t in_port;
 uint16_t out_port;
-unsigned char out_port_text[10];
-uint8_t key[16];
+unsigned char key[16];
 int client_connection_stage6(int x){
 
     int sockfd, sockfd_raw, sockfd_loopback;
@@ -41,6 +40,7 @@ int client_connection_stage6(int x){
     socklen_t addr_len = sizeof(struct sockaddr);
     struct ifreq ifr;
     int flag_extend =1;
+    int flag_key = 1;
     address_list_global[0]=inet_addr(ip_address_info("eth1"));
     address_list_global[1]=inet_addr(ip_address_info("eth2"));
     address_list_global[2]=inet_addr(ip_address_info("eth3"));
@@ -50,8 +50,6 @@ int client_connection_stage6(int x){
     char if_name[5];
     char router_ip[16];
     unsigned char key_text[16];
-    int k=0;
-
     sprintf(if_name,"%s","eth");
     sprintf(if_name+strlen(if_name),"%d",x);
     strcpy(router_ip,ip_address_info(if_name));
@@ -387,13 +385,13 @@ int client_connection_stage6(int x){
                 fprintf(stderr,"Received packet at ROuter !!!\n");
                 struct iphdr *ip = (struct iphdr *)(incoming_buf);
                 struct encrypt_header *encrypt_h = (struct encrypt_header *) (incoming_buf+ sizeof(struct iphdr));
-                if(encrypt_h->type == 0x65){
-                    //struct iphdr *ip_encrypt = (struct iphdr*) incoming_buf;
-                    fprintf(stderr,"Received packet at ROuter of type 65!!!\n");
+
+                fprintf(stderr, "############# encrypt_h->type = 0x%x\n",encrypt_h->type);
+                if(encrypt_h->type == 0x65 && flag_key ==1 && x==1){
                     out_proxy = fopen(filename,"a+");
                     fprintf(out_router, "pkt from port: %u, length: 19, contents: ",ntohs(their_addr.sin_port));
                     fprintf(out_router,"0x");
-                    for(int i=0;i<19;i++){
+                    for(int i=0;i<16;i++){
                         fprintf(out_router,"%02x",incoming_buf[i]);
                     }
                     fprintf(out_router,"\n");
@@ -408,16 +406,81 @@ int client_connection_stage6(int x){
                     fprintf(stderr, "\n");
                     fprintf(out_proxy,"\n");
                     fclose(out_proxy);
-                    k=key_text[0];
+                    flag_key =0;
                     continue;
                 }
-                if(encrypt_h->type == 0x62 && (flag_extend == 1) && (x==1)){
+
+                else if(encrypt_h->type == 0x65 && flag_key ==1 && x!=1){
+
+                    fprintf(stderr, "Now at router %d receiving key\n",x);
+                    out_proxy = fopen(filename,"a+");
+                    fprintf(out_router, "pkt from port: %u, length: 16, contents: ",ntohs(their_addr.sin_port));
+                    fprintf(out_router,"0x");
+                    for(int i=0;i<16;i++){
+                        fprintf(out_router,"%02x",incoming_buf[i]);
+                    }
+                    fprintf(out_router,"\n");
+                    fprintf(out_proxy,"fake-diffe-hellman, router index: %d circuit outgoing: 0x01, key: 0x",x);
+                    for(int i=0;i<16;i++){
+                        fprintf(out_proxy, "%x",encrypt_h->key[i]);
+                    }                    
+                    for(int i=0;i<16;i++){
+                        key_text[i] = encrypt_h->key[i];
+                        fprintf(stderr, "%x",key_text[i]);
+                    }
+                    fprintf(stderr, "\n");
+                    fprintf(out_proxy,"\n");
+                    fclose(out_proxy);
+                    flag_key =0;
+                    continue;
+                }
+
+                else if(encrypt_h->type == 0x65 && flag_key ==0){
+                    fprintf(stderr, "At router %d forwarding key\n",x);
+                    unsigned char *clear_crypt_text;
+                    int clear_crypt_text_len;
+                    AES_KEY dec_key;
+                    unsigned char crypt_text[strlen((char*)encrypt_h->key)+1]; 
+                    fprintf(stderr, "Length of crypt text received from proxy = %d\n",strlen((char*)encrypt_h->key));                  
+                    memcpy(crypt_text,encrypt_h->key,strlen((char*)encrypt_h->key)+1);
+                    int crypt_text_len = strlen((char*)crypt_text); 
+
+                    for(int i=0;i<16;i++){
+                        fprintf(stderr, "%x",key_text[i]);
+                    }  
+                    fprintf(stderr, "\n crypt_text_len=%d\n",crypt_text_len);
+
+                    class_AES_set_decrypt_key(key_text, &dec_key);
+                    class_AES_decrypt_with_padding(crypt_text, crypt_text_len, &clear_crypt_text, &clear_crypt_text_len, &dec_key);
+                    send_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+                    send_addr.sin_family = AF_INET;
+                    send_addr.sin_port = htons(out_port);
+                    memset(send_addr.sin_zero,'\0',sizeof send_addr.sin_zero);
+
+                    memcpy(encrypt_h->key,clear_crypt_text,strlen(clear_crypt_text)+1);
+
+                    fprintf(stderr,"out_port = %u",out_port);
+
+                    for(int i=0;i<16;i++){
+                        fprintf(stderr, "%x",clear_crypt_text[i]);
+                    } 
+
+                    if ((numbytes = sendto(sockfd,incoming_buf,sizeof(incoming_buf), 0,
+                            (struct sockaddr *)&send_addr, addr_len)) == -1) {
+                        perror("talker_router_circuit: sendto");
+                        exit(1);
+                    }
+
+                    free(clear_crypt_text);
+                }
+
+                else if(encrypt_h->type == 0x62 && (flag_extend == 1) && (x==1)){
+
+                    fprintf(stderr,"Received packet at router no.= %d\n", x);
 
                     in_c_id = encrypt_h->circuit_id;
                     out_c_id = x*256 +1;
                     in_port = ntohs(incoming_addr.sin_port);
-
-                    fprintf(stderr, "Received packet at ROuter of type 62!!!\n");
                     unsigned char *clear_crypt_text;
                     int clear_crypt_text_len;
                     AES_KEY dec_key;
@@ -425,7 +488,6 @@ int client_connection_stage6(int x){
                     crypt_text = encrypt_h->key;
                     int crypt_text_len = strlen(crypt_text);
 
-                    fprintf(stderr, "Using this key at router at router @@@@@@ %d\n",k);
                     for(int i=0;i<16;i++){
                         fprintf(stderr, "%x",key_text[i]);
                     }
@@ -436,13 +498,7 @@ int client_connection_stage6(int x){
                     class_AES_decrypt_with_padding(crypt_text, crypt_text_len, &clear_crypt_text, &clear_crypt_text_len, &dec_key);
 
                     //fprintf(stderr, "!!!!!!!!!! clear_crypt_text length = %d @@@@@@\n",strlen(clear_crypt_text));
-
-                    for(int i=0;i<strlen((char*)clear_crypt_text);i++){
-                        fprintf(stderr, "######## %c\n", clear_crypt_text[i]);
-                    }
-                    memset(&out_port_text, 0, sizeof out_port_text);
-                    memcpy(out_port_text,clear_crypt_text,strlen((char*)clear_crypt_text)+1);
-
+                    sscanf(clear_crypt_text,"%u",&out_port);
                     send_addr.sin_addr.s_addr = inet_addr(ip_address_info("eth0"));
                     send_addr.sin_family = AF_INET;
                     send_addr.sin_port = htons(in_port);
@@ -457,6 +513,9 @@ int client_connection_stage6(int x){
                     free(clear_crypt_text);
                 }
                 else if((encrypt_h->type == 0x62) && (flag_extend == 1) && (x!=1)){
+
+                    fprintf(stderr,"Received packet at ROuter NO. = %d\n", x);
+
                     in_c_id = encrypt_h->circuit_id;
                     out_c_id = x*256 +1;
                     in_port = ntohs(incoming_addr.sin_port);
@@ -464,15 +523,23 @@ int client_connection_stage6(int x){
                     unsigned char *clear_crypt_text;
                     int clear_crypt_text_len;
                     AES_KEY dec_key;
-                    unsigned char *crypt_text;                   
+                    unsigned char *crypt_text;
+                    fprintf(stderr,"Here encrypt_h = %d\n",strlen((char*)encrypt_h->key));                   
                     crypt_text = encrypt_h->key;
                     int crypt_text_len = strlen((char*)crypt_text);
+
+                    fprintf(stderr, "crypt_text_len = %d\n", crypt_text_len);
+
+                    for(int i=0;i<16;i++){
+                        fprintf(stderr, "%x",key_text[i]);
+                    }
+                    fprintf(stderr,"\n");
+
 
                     class_AES_set_decrypt_key(key_text, &dec_key);
                     class_AES_decrypt_with_padding(crypt_text, crypt_text_len, &clear_crypt_text, &clear_crypt_text_len, &dec_key);
 
-                    memset(&out_port_text, 0, sizeof out_port_text);
-                    memcpy(out_port_text,clear_crypt_text,strlen((char*)clear_crypt_text)+1);
+                    sscanf(clear_crypt_text,"%u",&out_port);
 
                     send_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
                     send_addr.sin_family = AF_INET;
@@ -488,6 +555,7 @@ int client_connection_stage6(int x){
                 }
                 else{
                     if((encrypt_h->type == 0x62) && (flag_extend == 0)){
+
                         send_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
                         send_addr.sin_family = AF_INET;
                         send_addr.sin_port = htons(out_port);
@@ -506,16 +574,26 @@ int client_connection_stage6(int x){
                         crypt_text = encrypt_h->key;
                         int crypt_text_len = strlen((char*)crypt_text);
 
+                        fprintf(stderr, "crypt_text_len=%d\n", crypt_text_len);
+
+                        for(int i=0;i<16;i++){
+                            fprintf(stderr, "%x",key_text[i]);
+                        }
+                        fprintf(stderr,"\n");
+
                         class_AES_set_decrypt_key(key_text, &dec_key);
                         class_AES_decrypt_with_padding(crypt_text, crypt_text_len, &clear_crypt_text, &clear_crypt_text_len, &dec_key);
 
-                        memcpy(encrypt_h->key,crypt_text,strlen((char*)crypt_text)+1);
+                        memcpy(encrypt_h->key,clear_crypt_text,clear_crypt_text_len+1);
+
+                        fprintf(stderr, "clear_crypt_text_len = %d and encrypt_h=%d\n",clear_crypt_text_len, strlen((char*)encrypt_h->key));
 
                         if ((numbytes = sendto(sockfd,incoming_buf,sizeof(incoming_buf), 0,
                                 (struct sockaddr *)&send_addr, addr_len)) == -1) {
                             perror("talker_router_circuit: sendto");
                             exit(1);
                         }
+                        free(clear_crypt_text);
                     }
                     else if((encrypt_h->type == 0x63) && (x!=1)){
                         send_addr.sin_addr.s_addr = inet_addr("127.0.0.1");

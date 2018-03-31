@@ -24,6 +24,7 @@
 #include <openssl/aes.h>
 #include <limits.h>
 #include <assert.h>
+#include <time.h>
 
 int main_stage3();
 int main_stage4();
