@@ -235,7 +235,6 @@ int client_connection_stage6(int x){
                 fprintf(stderr, "Received packet here numbyes at router %d = %d\n",x,numbytes_start);
 
                 if(buffer[0] == '-'){
-                    //fprintf(stderr, "Exiting router Message received %c\n", buffer[0]);
                     fclose(out_router);
                     close(sockfd);
                     close(sockfd_raw);
@@ -244,7 +243,6 @@ int client_connection_stage6(int x){
                     exit(0);
                 }
                 if(numbytes_start == 40){
-                    //struct iphdr *ip_encrypt = (struct iphdr*) buffer;
                     struct encrypt_header *encrypt_h = (struct encrypt_header *) (buffer+ sizeof(struct iphdr));
                     out_proxy = fopen(filename,"a+");
                     fprintf(out_router, "pkt from port: %u, length: 19, contents: ",ntohs(their_addr.sin_port));
@@ -259,7 +257,6 @@ int client_connection_stage6(int x){
                     }
                     fprintf(out_proxy,"\n");
                     fclose(out_proxy);
-                    
                     continue;
                 }
                 struct iphdr *ip;
@@ -273,9 +270,9 @@ int client_connection_stage6(int x){
                     relay_data = (struct relay_header*)(buffer);
                     ip = (struct iphdr *)(buffer+sizeof(struct relay_header));
                 }
-                
+                fprintf(stderr, "IP protocol = %d\n", ip->protocol);
+
                 if(ip->protocol == 253){
-                    fprintf(stderr, "Coming inside\n" );
                     struct cntrl_header * cnt_h =  (struct cntrl_header *) (buffer + sizeof(struct iphdr));
                     struct sockaddr_in send_addr;
                     socklen_t addr_len = sizeof(struct sockaddr);
@@ -344,7 +341,6 @@ int client_connection_stage6(int x){
                     }
                     continue;
                 }
-
                 if(ip->protocol == 1){
                     icmp = (struct icmphdr *)(buffer+sizeof(struct iphdr)+ sizeof(struct relay_header));
                     flag_protocol =1;
@@ -360,12 +356,11 @@ int client_connection_stage6(int x){
                 else if (ip->protocol == 6){
                      tcp_h = (struct tcphdr *)(buffer+sizeof(struct iphdr)+ sizeof(struct relay_header)); 
                      flag_protocol =6; 
-                     //fprintf(stderr, "NUMBYTES SENDING = %d\n",numbytes_start);
                 }
 
                 if((relay_data->type == 0x61) && (relay_data->circuit_id == in_c_id)){
                     if((flag_protocol == 1) && (out_port == 65535)){
-                        // sendmsg format referred from http://www.microhowto.info/howto/send_an_arbitrary_ipv4_datagram_using_a_raw_socket_in_c.html
+
                         ip->saddr = inet_addr(router_ip);
                         their_addr.sin_addr.s_addr = ip->daddr;
 
@@ -389,8 +384,6 @@ int client_connection_stage6(int x){
                             perror("talker_router _hello: sendmsg");
                             exit(1);
                         }
-                        //fprintf(stderr,"!!!!! raw packet sent + numbytes = %d\n",numbytes);
-                        //fflush(NULL); 
                     }
                     else if((flag_protocol == 6) && (out_port == 65535)){
                         ip->saddr = inet_addr(router_ip);
@@ -443,7 +436,7 @@ int client_connection_stage6(int x){
                         struct sockaddr_in forward_addr;
                         forward_addr.sin_family = AF_INET;
                         forward_addr.sin_port = htons(out_port);
-                        forward_addr.sin_addr.s_addr = address_list_global[x]; // forward to index+1 router
+                        forward_addr.sin_addr.s_addr = outgoing_ip_addr; // forward to index+1 router
                         memset(forward_addr.sin_zero,'\0',sizeof forward_addr.sin_zero);
 
                         out_router = fopen(filename,"a+");
@@ -465,7 +458,7 @@ int client_connection_stage6(int x){
                         struct sockaddr_in forward_addr;
                         forward_addr.sin_family = AF_INET;
                         forward_addr.sin_port = htons(out_port);
-                        forward_addr.sin_addr.s_addr = address_list_global[x]; // forward to index+1 router
+                        forward_addr.sin_addr.s_addr = outgoing_ip_addr; // forward to index+1 router
                         memset(forward_addr.sin_zero,'\0',sizeof forward_addr.sin_zero);
 
                         out_router = fopen(filename,"a+");
@@ -482,11 +475,9 @@ int client_connection_stage6(int x){
                     }
                 } 
                 else if((relay_data->type == 0x64) && (flag_protocol == 1)/*&& (relay_data->circuit_id == out_c_id)*/){
-                    // if router 1 send to proxy
-                    if(x==1){
                         send_addr.sin_family = AF_INET;
-                        send_addr.sin_port = htons(port_number_proxy);
-                        send_addr.sin_addr.s_addr = inet_addr(ip_address_info("eth0"));
+                        send_addr.sin_port = htons(in_port);
+                        send_addr.sin_addr.s_addr = incoming_ip_addr;
                         memset(send_addr.sin_zero,'\0',sizeof send_addr.sin_zero);
 
                         out_router = fopen(filename,"a+");
@@ -500,33 +491,11 @@ int client_connection_stage6(int x){
                             perror("talker_router: sendto");
                             exit(1);
                         } 
-                    }
-                    else{
-                        struct sockaddr_in forward_relay_addr;
-                        forward_relay_addr.sin_family = AF_INET;
-                        forward_relay_addr.sin_port = htons(in_port);
-                        forward_relay_addr.sin_addr.s_addr = address_list_global[x-2]; // forward to index+1 router
-                        memset(forward_relay_addr.sin_zero,'\0',sizeof forward_relay_addr.sin_zero);
-
-                        out_router = fopen(filename,"a+");
-                        fprintf(out_router, "relay reply packet, circuit incoming: 0x%02x, outgoing: 0x%02x, src: %s, ",out_c_id, in_c_id, inet_ntoa(*(struct in_addr*)&ip->daddr));
-                        fprintf(out_router, "incoming dst: %s ",inet_ntoa(*(struct in_addr*)&address_list_global[x-1]));
-                        fprintf(out_router, "outgoing dst: %s\n",inet_ntoa(*(struct in_addr*)&address_list_global[x-2]));
-                        fclose(out_router);
-
-                        if ((numbytes = sendto(sockfd,buffer,numbytes_start, 0,
-                            (struct sockaddr *)&forward_relay_addr, sizeof forward_relay_addr)) == -1) {
-                            perror("talker_router_relaydata_to_next_router: sendto");
-                            exit(1);
-                        }
-                    }
                 }
                 else if((relay_data->type == 0x64) && (flag_protocol == 6)/*&& (relay_data->circuit_id == out_c_id)*/){
-                    // if router 1 send to proxy
-                    if(x==1){
                         send_addr.sin_family = AF_INET;
-                        send_addr.sin_port = htons(port_number_proxy);
-                        send_addr.sin_addr.s_addr = inet_addr(ip_address_info("eth0"));
+                        send_addr.sin_port = htons(in_port);
+                        send_addr.sin_addr.s_addr = incoming_ip_addr;
                         memset(send_addr.sin_zero,'\0',sizeof send_addr.sin_zero);
 
                         out_router = fopen(filename,"a+");
@@ -540,26 +509,6 @@ int client_connection_stage6(int x){
                             perror("talker_router: sendto");
                             exit(1);
                         } 
-                    }
-                    else{
-                        struct sockaddr_in forward_relay_addr;
-                        forward_relay_addr.sin_family = AF_INET;
-                        forward_relay_addr.sin_port = htons(in_port);
-                        forward_relay_addr.sin_addr.s_addr = address_list_global[x-2]; // forward to index+1 router
-                        memset(forward_relay_addr.sin_zero,'\0',sizeof forward_relay_addr.sin_zero);
-
-                        out_router = fopen(filename,"a+");
-                        fprintf(out_router, "incoming TCP packet, circuit incoming:0x%02x, src IP/port: %s:%d, ",in_c_id, inet_ntoa(*(struct in_addr*)&ip->saddr), ntohs(tcp_h->th_sport));
-                        fprintf(out_router, "dst IP/port: %s:%d, ",inet_ntoa(*(struct in_addr*)&ip->daddr), ntohs(tcp_h->th_dport));
-                        fprintf(out_router, "seqno: %d, ackno: %d \n",ntohs(tcp_h->seq), ntohs(tcp_h->ack_seq));
-                        fclose(out_router);
-
-                        if ((numbytes = sendto(sockfd,buffer,numbytes_start, 0,
-                            (struct sockaddr *)&forward_relay_addr, sizeof forward_relay_addr)) == -1) {
-                            perror("talker_router_relaydata_to_next_router: sendto");
-                            exit(1);
-                        }
-                    }
                 }
                 else{
                     //fprintf(stderr, "The packet is not having correct id relay->cirID = %x, in_c_id = %x\n", relay_data->circuit_id, in_c_id);
@@ -605,33 +554,15 @@ int client_connection_stage6(int x){
                 for(int i=0;i<84;i++){
                     buffer[CNTRL_HEADER_SIZE+i] = buffer_torecv[i];
                 }
-                // if router 1 send to proxy
-                if(x==1){
                     send_addr.sin_family = AF_INET;
-                    send_addr.sin_port = htons(port_number_proxy);
-                    send_addr.sin_addr.s_addr = inet_addr(ip_address_info("eth0"));
+                    send_addr.sin_port = htons(in_port);
+                    send_addr.sin_addr.s_addr = incoming_ip_addr;
                     memset(send_addr.sin_zero,'\0',sizeof send_addr.sin_zero);
                     if ((numbytes = sendto(sockfd,buffer,88, 0,
                         (struct sockaddr *)&send_addr, sizeof send_addr)) == -1) {
                         perror("talker_router: sendto");
                         exit(1);
                     } 
-                }
-                else{
-                    struct sockaddr_in forward_relay_addr;
-                    forward_relay_addr.sin_family = AF_INET;
-                    forward_relay_addr.sin_port = htons(in_port);
-                    forward_relay_addr.sin_addr.s_addr = address_list_global[x-2]; // forward to index+1 router
-                    memset(forward_relay_addr.sin_zero,'\0',sizeof forward_relay_addr.sin_zero);
-                    //fprintf(stderr, "Relay data to router %d c_id=%u\n",(x-1), relay_data->circuit_id);
-
-                    if ((numbytes = sendto(sockfd,buffer,88, 0,
-                        (struct sockaddr *)&forward_relay_addr, sizeof forward_relay_addr)) == -1) {
-                        perror("talker_router_relaydata_to_next_router: sendto");
-                        exit(1);
-                    }
-                }
-                  
             }
 
             if(FD_ISSET(sockfd_tcp, &readfds)){
@@ -671,31 +602,15 @@ int client_connection_stage6(int x){
                 fclose(out_router);
 
                 numbytes = (numbytes+CNTRL_HEADER_SIZE);
-                if(x==1){
                     send_addr.sin_family = AF_INET;
-                    send_addr.sin_port = htons(port_number_proxy);
-                    send_addr.sin_addr.s_addr = inet_addr(ip_address_info("eth0"));
+                    send_addr.sin_port = htons(in_port);
+                    send_addr.sin_addr.s_addr = incoming_ip_addr;
                     memset(send_addr.sin_zero,'\0',sizeof send_addr.sin_zero);
                     if ((numbytes = sendto(sockfd,buffer,numbytes, 0,
                         (struct sockaddr *)&send_addr, sizeof send_addr)) == -1) {
                         perror("talker_router: sendto");
                         exit(1);
-                    } 
-                }
-                else{
-                    struct sockaddr_in forward_relay_addr;
-                    forward_relay_addr.sin_family = AF_INET;
-                    forward_relay_addr.sin_port = htons(in_port);
-                    forward_relay_addr.sin_addr.s_addr = address_list_global[x-2]; // forward to index+1 router
-                    memset(forward_relay_addr.sin_zero,'\0',sizeof forward_relay_addr.sin_zero);
-                    //fprintf(stderr, "Relay data to router %d c_id=%u\n",(x-1), relay_data->circuit_id);
-
-                    if ((numbytes = sendto(sockfd,buffer,numbytes, 0,
-                        (struct sockaddr *)&forward_relay_addr, sizeof forward_relay_addr)) == -1) {
-                        perror("talker_router_relaydata_to_next_router: sendto");
-                        exit(1);
                     }
-                }
 
             }
 

@@ -10,6 +10,7 @@ tunnel_reader_stage6 function handles the proxy packets
 
 FILE *out_proxy; 
 int hops_router_index_list[6]={0};
+int flag_circuit =1;
 // int port_number_proxy;
 // int port_number_router;
 // int sockfd_proxy;
@@ -284,12 +285,14 @@ int tunnel_reader_stage6()
                 else
                 {                    
                     struct iphdr *ip = (struct iphdr *)(buffer);
-                    //struct icmphdr *icmp = (struct icmphdr *)(buffer+sizeof(struct iphdr));
                     struct tcphdr *tcp_h = (struct tcphdr*)(buffer+sizeof(struct iphdr));
-                    ////fprintf(stderr, "Read a packet from tunnel, packet length:%d, dest address=%s\n", 
-                        //nread, inet_ntoa(*(struct in_addr*)&ip->daddr));
+
                     if(ip->protocol == 6){
                         //fprintf(stderr,"hello tcp\n");
+                        if(flag_circuit == 1){
+                            global_key = circuit_creation(number_routers,manitor_hops);
+                            flag_circuit =0;
+                        }
                         char buf_whole[MAX_TCP_BUF_LEN];
                         memset(&buf_whole,'\0',sizeof buf_whole);
 
@@ -307,11 +310,11 @@ int tunnel_reader_stage6()
                         fclose(out_proxy);
                         //int index = ntohl(ip->daddr) % number_routers; 
                         //index++;
-                        int index =1;
+                        //int index =1;
                         //fprintf(stderr, "index value hashmap = %d\n", index);
                         my_addr.sin_family = AF_INET;
-                        my_addr.sin_port = htons(port_number_router_int_global[index-1]);
-                        my_addr.sin_addr.s_addr = address_list_global[index-1];
+                        my_addr.sin_port = htons(port_number_router_int_global[hops_router_index_list[0]]);
+                        my_addr.sin_addr.s_addr = address_list_global[hops_router_index_list[0]];
                         memset(my_addr.sin_zero,'\0',sizeof my_addr.sin_zero);
                         if ((numbytes = sendto(sockfd_proxy,buf_whole,(nread+CNTRL_HEADER_SIZE), 0,
                             (struct sockaddr *)&my_addr, sizeof my_addr)) == -1) {
@@ -322,6 +325,11 @@ int tunnel_reader_stage6()
                     }
 
                     else if(ip->protocol ==1){
+
+                        if(flag_circuit == 1){
+                            global_key = circuit_creation(number_routers,manitor_hops);
+                            flag_circuit =0;
+                        }
 
                         char buf_whole[88];
                         memset(&buf_whole,'\0',sizeof buf_whole);
@@ -339,12 +347,12 @@ int tunnel_reader_stage6()
                         fprintf(out_proxy, "ICMP from tunnel, src: %s, ",inet_ntoa(*(struct in_addr*)&ip->saddr));
                         fprintf(out_proxy, "dst: %s, type: 8\n",inet_ntoa(*(struct in_addr*)&ip->daddr));
                         fclose(out_proxy);
-                        int index = ntohl(ip->daddr) % number_routers; 
-                        index++;
+                        // int index = ntohl(ip->daddr) % number_routers; 
+                        // index++;
                         //fprintf(stderr, "index value hashmap = %d\n", index);
                         my_addr.sin_family = AF_INET;
-                        my_addr.sin_port = htons(port_number_router_int_global[index-1]);
-                        my_addr.sin_addr.s_addr = address_list_global[index-1];
+                        my_addr.sin_port = htons(port_number_router_int_global[hops_router_index_list[0]]);
+                        my_addr.sin_addr.s_addr = address_list_global[hops_router_index_list[0]];
                         memset(my_addr.sin_zero,'\0',sizeof my_addr.sin_zero);
                         //fprintf(stderr, "port number =%d and address =%u\n",port_number_router_int_global[index-1],address_list_global[index-1]);
                         if ((numbytes = sendto(sockfd_proxy,buf_whole,88, 0,
@@ -414,7 +422,7 @@ int main_stage6()
         fclose(out_proxy);
         }  
     }
-    global_key = circuit_creation(number_routers,manitor_hops); 
+    //global_key = circuit_creation(number_routers,manitor_hops); 
     tunnel_reader_stage6();  
     close(sockfd_proxy);
     return 0;
