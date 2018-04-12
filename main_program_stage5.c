@@ -27,7 +27,7 @@ char* ip_address_info(char *ifname){
     close(fd_ip);
     char *ip_address_eth0 = inet_ntoa(( (struct sockaddr_in *)&ifr.ifr_addr )->sin_addr);
     //display result
-    printf("%s - %s\n" , interface_name , inet_ntoa(( (struct sockaddr_in *)&ifr.ifr_addr )->sin_addr) );
+    //printf("%s - %s\n" , interface_name , inet_ntoa(( (struct sockaddr_in *)&ifr.ifr_addr )->sin_addr) );
     return ip_address_eth0;
 }
 

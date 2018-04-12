@@ -15,6 +15,7 @@
 #include <netdb.h>
 #include <netinet/ip.h>
 #include <netinet/ip_icmp.h>
+#include <netinet/tcp.h>
 #include <openssl/aes.h>
 #include <limits.h>
 #include <assert.h>
@@ -24,19 +25,26 @@
 #include <openssl/aes.h>
 #include <limits.h>
 #include <assert.h>
-#include <time.h>
+#include <stdbool.h>
+
+#define MAX_TCP_BUF_LEN 1600
+#define TCP_HEADER_SIZE 20
+#define CNTRL_HEADER_SIZE 4
 
 int main_stage3();
 int main_stage4();
 int main_stage5();
 int main_stage6();
+int main_stage7();
 int client_connection_stage3();
 int client_connection_stage4();
 int client_connection_stage5();
 int client_connection_stage6();
+int client_connection_stage7();
 
 void circuit_creation_stage5(int x, int y);
 uint8_t* circuit_creation(int x, int y);
+uint8_t* circuit_creation_stage7(int x, int y);
 
 void class_AES_set_encrypt_key(unsigned char *key_text, AES_KEY *enc_key);
 void class_AES_set_decrypt_key(unsigned char *key_text, AES_KEY *dec_key);
@@ -48,11 +56,16 @@ char* ip_address_info_stage3(char *ifname);
 char* ip_address_info_stage4(char *ifname);
 char* ip_address_info_stage5(char *ifname);
 char* ip_address_info_stage6(char *ifname);
+char* ip_address_info_stage7(char *ifname);
+
+uint16_t ip_checksum_stage6(void* vdata,size_t length);
+unsigned short checksum_tcp(unsigned short *ptr,int nbytes);
 
 extern int port_number_proxy;
 extern int port_number_router;
 extern int sockfd_proxy;
 extern int port_number_router_int_global[6];
+extern int hops_router_index_list[6];
 extern FILE *out_proxy;
 extern FILE *out_router;
 extern char pid_router_char[100];

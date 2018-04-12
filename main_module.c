@@ -54,13 +54,21 @@ int main(int argc, char** argv)
 {
 	number_routers = read_file(argv[1]);
     fprintf(stderr,"!!!!!!! STAGE NUMBER = %d !!!!!!!\n", stage_number);
-	if(stage_number == 6)
+	if(stage_number == 6){
 		main_stage6();
-	else if(stage_number == 3)
+    }
+	else if(stage_number == 3){
 		main_stage3();
-	else if(stage_number == 4)
+    }
+	else if(stage_number == 4){
 		main_stage4();
-	else if(stage_number == 5)
+    }
+	else if(stage_number == 5){
 		main_stage5();
+    }
+    else if(stage_number == 7){
+        main_stage7();
+    }
+
 	return 0;
 } 

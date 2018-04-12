@@ -224,15 +224,12 @@ int client_connection_stage6(int x){
                 int numbytes_start =0;
 
                 memset(&buffer, '\0', sizeof buffer);
-                fprintf(stderr, "Receiving at router %d\n",x );
 
                 if ((numbytes_start = recvfrom(sockfd, buffer, sizeof buffer, 0,
                     (struct sockaddr *)&their_addr, &addr_len)) == -1) {
                     perror("recvfrom");
                     exit(1);
                 }
-
-                fprintf(stderr, "Received packet here numbyes at router %d = %d\n",x,numbytes_start);
 
                 if(buffer[0] == '-'){
                     //fprintf(stderr, "Exiting router Message received %c\n", buffer[0]);
@@ -262,88 +259,10 @@ int client_connection_stage6(int x){
                     
                     continue;
                 }
-                struct iphdr *ip;
-                struct relay_header *relay_data;
+                struct relay_header *relay_data = (struct relay_header*)(buffer);
+                struct iphdr *ip = (struct iphdr *)(buffer+sizeof(struct relay_header));
                 struct icmphdr *icmp;
                 struct tcphdr *tcp_h;
-                if(numbytes_start == 30){
-                    ip = (struct iphdr *)(buffer);
-                }
-                else{
-                    relay_data = (struct relay_header*)(buffer);
-                    ip = (struct iphdr *)(buffer+sizeof(struct relay_header));
-                }
-                
-                if(ip->protocol == 253){
-                    fprintf(stderr, "Coming inside\n" );
-                    struct cntrl_header * cnt_h =  (struct cntrl_header *) (buffer + sizeof(struct iphdr));
-                    struct sockaddr_in send_addr;
-                    socklen_t addr_len = sizeof(struct sockaddr);
-                    if((cnt_h->type == 0x62) && (flag_extend == 1)){
-                        in_c_id = cnt_h->circuit_id;
-                        out_c_id = x*256 +1;
-                        in_port = ntohs(their_addr.sin_port);
-                        out_port = cnt_h->next_name;
-                        incoming_ip_addr = ip->saddr;
-                        outgoing_ip_addr = ip->daddr;
-                        cnt_h->type = 0x63;
-                        
-                        send_addr.sin_addr.s_addr = incoming_ip_addr;
-                        send_addr.sin_family = AF_INET;
-                        send_addr.sin_port = htons(in_port);
-
-                        out_router = fopen(filename,"a+");
-                        fprintf(out_router, "pkt from port: %u, length: 19, contents: 0x%02x%04x",ntohs(their_addr.sin_port), cnt_h->type, cnt_h->circuit_id);
-                        fprintf(out_router, "\n");
-                        fprintf(out_router, "new extend circuit: incoming: 0x%02x, outgoing: 0x%02x at %u\n", in_c_id, out_c_id, out_port);
-                        fclose(out_router);
-
-                        if ((numbytes = sendto(sockfd,buffer,30, 0,
-                                (struct sockaddr *)&send_addr, addr_len)) == -1) {
-                            perror("talker_router_circuit: sendto");
-                            exit(1);
-                        }
-                        flag_extend =0;
-                    }
-                    else{
-                        if((cnt_h->type == 0x62) && (flag_extend == 0)){
-                            fprintf(stderr, "Now coming here router %d, iutgoing ip= %s\n",x, inet_ntoa(*(struct in_addr*)&outgoing_ip_addr));
-                            send_addr.sin_addr.s_addr = outgoing_ip_addr;
-                            send_addr.sin_family = AF_INET;
-                            send_addr.sin_port = htons(out_port);
-                            out_router = fopen(filename,"a+");
-                            fprintf(out_router, "pkt from port: %u, length: 5, contents: 0x%02x%04x%04x\n",ntohs(their_addr.sin_port), cnt_h->type, cnt_h->circuit_id,cnt_h->next_name );
-                            fprintf(out_router, "forwarding extend circuit: incoming: 0x%02x, outgoing: 0x%02x at %u\n", in_c_id, out_c_id, out_port);
-                            fclose(out_router);
-
-                            cnt_h->circuit_id = out_c_id;
-
-                            if ((numbytes = sendto(sockfd,buffer,30, 0,
-                                    (struct sockaddr *)&send_addr, addr_len)) == -1) {
-                                perror("talker_router_circuit: sendto");
-                                exit(1);
-                            }
-                        }
-                        else if((cnt_h->type == 0x63)){
-                            send_addr.sin_addr.s_addr = incoming_ip_addr;
-                            send_addr.sin_family = AF_INET;
-                            send_addr.sin_port = htons(in_port);
-                            out_router = fopen(filename,"a+");
-                            fprintf(out_router, "pkt from port: %u, length: 3, contents: 0x%02x%04x\n",ntohs(their_addr.sin_port), cnt_h->type, cnt_h->circuit_id);                            
-                            fprintf(out_router, "forwarding extend-done circuit: incoming: 0x%02x, outgoing: 0x%02x at %u\n", out_c_id, in_c_id, in_port);
-                            fclose(out_router);
-
-                            //fprintf(stderr,"**In router:%d, Forwarding Reply:IID=0x%x OID=0x%x,Incoming Port=%u Outgoing Port=%u Next_Hop=%u\n",x, in_c_id, out_c_id, in_port,out_port, cnt_h->next_name);
-                            if ((numbytes = sendto(sockfd,buffer,30, 0,
-                                    (struct sockaddr *)&send_addr, addr_len)) == -1) {
-                                perror("talker_router_circuit: sendto");
-                                exit(1);
-                            }
-                        }
-                        flag_extend =0;
-                    }
-                    continue;
-                }
 
                 if(ip->protocol == 1){
                     icmp = (struct icmphdr *)(buffer+sizeof(struct iphdr)+ sizeof(struct relay_header));
